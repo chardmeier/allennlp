@@ -250,6 +250,7 @@ class CoreferenceResolver(Model):
         predicted_antecedents -= 1
 
         output_dict = {"top_spans": top_spans,
+                       "top_span_embeddings": top_span_embeddings,
                        "antecedent_indices": valid_antecedent_indices,
                        "predicted_antecedents": predicted_antecedents}
         if span_labels is not None:
