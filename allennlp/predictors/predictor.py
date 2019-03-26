@@ -1,5 +1,6 @@
-from typing import List
+from typing import List, Iterator
 import json
+from contextlib import contextmanager
 
 from allennlp.common import Registrable
 from allennlp.common.checks import ConfigurationError
@@ -10,14 +11,21 @@ from allennlp.models.archival import Archive, load_archive
 
 # a mapping from model `type` to the default Predictor for that type
 DEFAULT_PREDICTORS = {
-        'srl': 'semantic-role-labeling',
-        'decomposable_attention': 'textual-entailment',
+        'atis_parser' : 'atis_parser',
+        'biaffine_parser': 'biaffine-dependency-parser',
         'bidaf': 'machine-comprehension',
         'bidaf-ensemble': 'machine-comprehension',
-        'simple_tagger': 'sentence-tagger',
-        'crf_tagger': 'sentence-tagger',
-        'coref': 'coreference-resolution',
+        'bimpm': 'textual-entailment',
         'constituency_parser': 'constituency-parser',
+        'coref': 'coreference-resolution',
+        'crf_tagger': 'sentence-tagger',
+        'decomposable_attention': 'textual-entailment',
+        'dialog_qa': 'dialog_qa',
+        'event2mind': 'event2mind',
+        'simple_tagger': 'sentence-tagger',
+        'srl': 'semantic-role-labeling',
+        'quarel_parser': 'quarel-parser',
+        'wikitables_mml_parser': 'wikitables-parser'
 }
 
 class Predictor(Registrable):
@@ -46,6 +54,40 @@ class Predictor(Registrable):
     def predict_json(self, inputs: JsonDict) -> JsonDict:
         instance = self._json_to_instance(inputs)
         return self.predict_instance(instance)
+
+    @contextmanager
+    def capture_model_internals(self) -> Iterator[dict]:
+        """
+        Context manager that captures the internal-module outputs of
+        this predictor's model. The idea is that you could use it as follows:
+
+        .. code-block:: python
+
+            with predictor.capture_model_internals() as internals:
+                outputs = predictor.predict_json(inputs)
+
+            return {**outputs, "model_internals": internals}
+        """
+        results = {}
+        hooks = []
+
+        # First we'll register hooks to add the outputs of each module to the results dict.
+        def add_output(idx: int):
+            def _add_output(mod, _, outputs):
+                results[idx] = {"name": str(mod), "output": sanitize(outputs)}
+            return _add_output
+
+        for idx, module in enumerate(self._model.modules()):
+            if module != self._model:
+                hook = module.register_forward_hook(add_output(idx))
+                hooks.append(hook)
+
+        # If you capture the return value of the context manager, you get the results dict.
+        yield results
+
+        # And then when you exit the context we remove all the hooks.
+        for hook in hooks:
+            hook.remove()
 
     def predict_instance(self, instance: Instance) -> JsonDict:
         outputs = self._model.forward_on_instance(instance)

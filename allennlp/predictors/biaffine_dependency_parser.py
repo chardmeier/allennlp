@@ -80,10 +80,10 @@ class BiaffineDependencyParserPredictor(Predictor):
     """
     Predictor for the :class:`~allennlp.models.BiaffineDependencyParser` model.
     """
-    def __init__(self, model: Model, dataset_reader: DatasetReader) -> None:
+    def __init__(self, model: Model, dataset_reader: DatasetReader, language: str = 'en_core_web_sm') -> None:
         super().__init__(model, dataset_reader)
         # TODO(Mark) Make the language configurable and based on a model attribute.
-        self._tokenizer = SpacyWordSplitter(language='en_core_web_sm', pos_tags=True)
+        self._tokenizer = SpacyWordSplitter(language=language, pos_tags=True)
 
     def predict(self, sentence: str) -> JsonDict:
         """
@@ -105,7 +105,12 @@ class BiaffineDependencyParserPredictor(Predictor):
         """
         spacy_tokens = self._tokenizer.split_words(json_dict["sentence"])
         sentence_text = [token.text for token in spacy_tokens]
-        pos_tags = [token.tag_ for token in spacy_tokens]
+        if self._dataset_reader.use_language_specific_pos: # type: ignore
+            # fine-grained part of speech
+            pos_tags = [token.tag_ for token in spacy_tokens]
+        else:
+            # coarse-grained part of speech (Universal Depdendencies format)
+            pos_tags = [token.pos_ for token in spacy_tokens]
         return self._dataset_reader.text_to_instance(sentence_text, pos_tags)
 
     @overrides

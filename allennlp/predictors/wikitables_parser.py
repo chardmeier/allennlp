@@ -3,14 +3,17 @@ import pathlib
 from subprocess import run
 from typing import List
 import shutil
+import requests
 
 from overrides import overrides
+import torch
 
 from allennlp.common.file_utils import cached_path
 from allennlp.common.util import JsonDict, sanitize
 from allennlp.data import DatasetReader, Instance
 from allennlp.models import Model
 from allennlp.predictors.predictor import Predictor
+from allennlp.common.checks import check_for_java
 
 # TODO(mattg): We should merge how this works with how the `WikiTablesAccuracy` metric works, maybe
 # just removing the need for adding this stuff at all, because the parser already runs the java
@@ -38,13 +41,15 @@ class WikiTablesParserPredictor(Predictor):
         os.makedirs(SEMPRE_DIR, exist_ok=True)
         abbreviations_path = os.path.join(SEMPRE_DIR, 'abbreviations.tsv')
         if not os.path.exists(abbreviations_path):
-            run(f'wget {ABBREVIATIONS_FILE}', shell=True)
-            run(f'mv wikitables-abbreviations.tsv {abbreviations_path}', shell=True)
+            result = requests.get(ABBREVIATIONS_FILE)
+            with open(abbreviations_path, 'wb') as downloaded_file:
+                downloaded_file.write(result.content)
 
         grammar_path = os.path.join(SEMPRE_DIR, 'grow.grammar')
         if not os.path.exists(grammar_path):
-            run(f'wget {GROW_FILE}', shell=True)
-            run(f'mv wikitables-grow.grammar {grammar_path}', shell=True)
+            result = requests.get(GROW_FILE)
+            with open(grammar_path, 'wb') as downloaded_file:
+                downloaded_file.write(result.content)
 
     @overrides
     def _json_to_instance(self, json_dict: JsonDict) -> Instance:
@@ -63,12 +68,66 @@ class WikiTablesParserPredictor(Predictor):
         return instance
 
     @overrides
+    def predict_json(self, inputs: JsonDict) -> JsonDict:
+        """
+        We need to override this because of the interactive beam search aspects.
+        """
+        # pylint: disable=protected-access,not-callable
+        instance = self._json_to_instance(inputs)
+
+        # Get the rules out of the instance
+        index_to_rule = [production_rule_field.rule
+                         for production_rule_field in instance.fields['actions'].field_list]
+        rule_to_index = {rule: i for i, rule in enumerate(index_to_rule)}
+
+        # A sequence of strings to force, then convert them to ints
+        initial_tokens = inputs.get("initial_sequence", [])
+
+        # Want to get initial_sequence on the same device as the model.
+        initial_sequence = torch.tensor([rule_to_index[token] for token in initial_tokens],
+                                        device=next(self._model.parameters()).device)
+
+        # Replace beam search with one that forces the initial sequence
+        original_beam_search = self._model._beam_search
+        interactive_beam_search = original_beam_search.constrained_to(initial_sequence)
+        self._model._beam_search = interactive_beam_search
+
+        # Now get results
+        results = self.predict_instance(instance)
+
+        # And add in the choices. Need to convert from idxs to rules.
+        results["choices"] = [
+                [(probability, action)
+                 for probability, action in zip(pa["action_probabilities"], pa["considered_actions"])]
+                for pa in results["predicted_actions"]
+        ]
+
+        results["beam_snapshots"] = {
+                # For each batch_index, we get a list of beam snapshots
+                batch_index: [
+                        # Each beam_snapshots consists of a list of timesteps,
+                        # each of which is a list of pairs (score, sequence).
+                        # The sequence is the *indices* of the rules, which we
+                        # want to convert to the string representations.
+                        [(score, [index_to_rule[idx] for idx in sequence])
+                         for score, sequence in timestep_snapshot]
+                        for timestep_snapshot in beam_snapshots
+                ]
+                for batch_index, beam_snapshots in interactive_beam_search.beam_snapshots.items()
+        }
+
+        # Restore original beam search
+        self._model._beam_search = original_beam_search
+
+        return results
+
+
+    @overrides
     def predict_instance(self, instance: Instance) -> JsonDict:
         outputs = self._model.forward_on_instance(instance)
         outputs['answer'] = self._execute_logical_form_on_table(outputs['logical_form'],
                                                                 outputs['original_table'])
         return sanitize(outputs)
-
 
     def predict_batch_instance(self, instances: List[Instance]) -> List[JsonDict]:
         outputs = self._model.forward_on_instances(instances)
@@ -107,6 +166,8 @@ class WikiTablesParserPredictor(Predictor):
         # TODO(matt): The jar that we have isn't optimal for this use case - we're using a
         # script designed for computing accuracy, and just pulling out a piece of it. Writing
         # a new entry point to the jar that's tailored for this use would be cleaner.
+        if not check_for_java():
+            raise RuntimeError('Java is not installed properly.')
         command = ' '.join(['java',
                             '-jar',
                             cached_path(DEFAULT_EXECUTOR_JAR),

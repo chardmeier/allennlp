@@ -40,7 +40,7 @@ In this case your class just needs to explicitly implement its own `from_params`
 method.
 """
 
-from typing import TypeVar, Type, Dict, Union, Any, cast
+from typing import TypeVar, Type, Dict, Union, Any, cast, List, Tuple, Set
 import inspect
 import logging
 
@@ -96,6 +96,8 @@ def create_kwargs(cls: Type[T], params: Params, **extras) -> Dict[str, Any]:
     For instance, you might provide an existing `Vocabulary` this way.
     """
     # Get the signature of the constructor.
+    from allennlp.models.archival import load_archive  # import here to avoid circular imports
+
     signature = inspect.signature(cls.__init__)
     kwargs: Dict[str, Any] = {}
 
@@ -122,8 +124,18 @@ def create_kwargs(cls: Type[T], params: Params, **extras) -> Dict[str, Any]:
         # We check the provided `extras` for these and just use them if they exist.
         if name in extras:
             kwargs[name] = extras[name]
-
-        # The next case is when the parameter type is itself constructible from_params.
+        # Next case is when argument should be loaded from pretrained archive.
+        elif name in params and isinstance(params.get(name), Params) and "_pretrained" in params.get(name):
+            load_module_params = params.pop(name).pop("_pretrained")
+            archive_file = load_module_params.pop("archive_file")
+            module_path = load_module_params.pop("module_path")
+            freeze = load_module_params.pop("freeze", True)
+            archive = load_archive(archive_file)
+            kwargs[name] = archive.extract_module(module_path, freeze) # pylint: disable=no-member
+            if not isinstance(kwargs[name], annotation):
+                raise ConfigurationError(f"The module from model at {archive_file} at path {module_path} "
+                                         f"was expected of type {annotation} but is of type {type(kwargs[name])}")
+        # # The next case is when the parameter type is itself constructible from_params.
         elif hasattr(annotation, 'from_params'):
             if name in params:
                 # Our params have an entry for this, so we use that.
@@ -144,7 +156,6 @@ def create_kwargs(cls: Type[T], params: Params, **extras) -> Dict[str, Any]:
                 if isinstance(subparams, str):
                     kwargs[name] = annotation.by_name(subparams)()
                 else:
-                    print(annotation)
                     kwargs[name] = annotation.from_params(params=subparams, **subextras)
             elif not optional:
                 # Not optional and not supplied, that's an error!
@@ -171,8 +182,9 @@ def create_kwargs(cls: Type[T], params: Params, **extras) -> Dict[str, Any]:
                             if optional
                             else params.pop_float(name))
 
-        # This is special logic for handling types like Dict[str, TokenIndexer], which it creates by
-        # instantiating each value from_params and returning the resulting dict.
+        # This is special logic for handling types like Dict[str, TokenIndexer],
+        # List[TokenIndexer], Tuple[TokenIndexer, Tokenizer], and Set[TokenIndexer],
+        # which it creates by instantiating each value from_params and returning the resulting structure.
         elif origin in (Dict, dict) and len(args) == 2 and hasattr(args[-1], 'from_params'):
             value_cls = annotation.__args__[-1]
 
@@ -182,6 +194,34 @@ def create_kwargs(cls: Type[T], params: Params, **extras) -> Dict[str, Any]:
                 value_dict[key] = value_cls.from_params(params=value_params, **extras)
 
             kwargs[name] = value_dict
+
+        elif origin in (List, list) and len(args) == 1 and hasattr(args[0], 'from_params'):
+            value_cls = annotation.__args__[0]
+
+            value_list = []
+
+            for value_params in params.pop(name, Params({})):
+                value_list.append(value_cls.from_params(params=value_params, **extras))
+
+            kwargs[name] = value_list
+
+        elif origin in (Tuple, tuple) and all(hasattr(arg, 'from_params') for arg in args):
+            value_list = []
+
+            for value_cls, value_params in zip(annotation.__args__, params.pop(name, Params({}))):
+                value_list.append(value_cls.from_params(params=value_params, **extras))
+
+            kwargs[name] = tuple(value_list)
+
+        elif origin in (Set, set) and len(args) == 1 and hasattr(args[0], 'from_params'):
+            value_cls = annotation.__args__[0]
+
+            value_set = set()
+
+            for value_params in params.pop(name, Params({})):
+                value_set.add(value_cls.from_params(params=value_params, **extras))
+
+            kwargs[name] = value_set
 
         else:
             # Pass it on as is and hope for the best.   ¯\_(ツ)_/¯
@@ -214,10 +254,13 @@ class FromParams:
         from allennlp.common.registrable import Registrable  # import here to avoid circular imports
 
         logger.info(f"instantiating class {cls} from params {getattr(params, 'params', params)} "
-                    f"and extras {extras}")
+                    f"and extras {set(extras.keys())}")
 
         if params is None:
             return None
+
+        if isinstance(params, str):
+            params = Params({"type": params})
 
         registered_subclasses = Registrable._registry.get(cls)
 

@@ -14,7 +14,6 @@ from allennlp.commands.train import train_model_from_file, train_model
 from allennlp.common import Params
 from allennlp.training.metrics import EvalbBracketingScorer
 
-EvalbBracketingScorer.compile_evalb()
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -63,16 +62,24 @@ if __name__ == "__main__":
         models = [
                 'biaffine_dependency_parser',
                 'bidaf',
+                'dialog_qa',
                 'constituency_parser',
                 'coref',
                 'decomposable_attention',
                 'encoder_decoder/simple_seq2seq',
+                'encoder_decoder/copynet_seq2seq',
                 'semantic_parsing/nlvr_coverage_semantic_parser',
                 'semantic_parsing/nlvr_direct_semantic_parser',
                 'semantic_parsing/wikitables',
+                'semantic_parsing/quarel',
+                'semantic_parsing/quarel/zeroshot',
+                'semantic_parsing/quarel/tagger',
+                'semantic_parsing/atis',
                 'srl',
         ]
         for model in models:
+            if model == 'constituency_parser':
+                EvalbBracketingScorer.compile_evalb()
             train_fixture(f"allennlp/tests/fixtures/{model}/")
     logger.info("Changing directory back to %s", initial_working_dir)
     os.chdir(initial_working_dir)

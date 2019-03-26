@@ -10,7 +10,7 @@ from allennlp.data import Vocabulary
 from allennlp.models.model import Model
 from allennlp.modules.token_embedders import Embedding
 from allennlp.modules import FeedForward
-from allennlp.modules import Seq2SeqEncoder, TimeDistributed, TextFieldEmbedder, SpanPruner
+from allennlp.modules import Seq2SeqEncoder, TimeDistributed, TextFieldEmbedder, Pruner
 from allennlp.modules.span_extractors import SelfAttentiveSpanExtractor, EndpointSpanExtractor
 from allennlp.nn import util, InitializerApplicator, RegularizerApplicator
 from allennlp.training.metrics import MentionRecall, ConllCorefScores
@@ -81,7 +81,7 @@ class CoreferenceResolver(Model):
         feedforward_scorer = torch.nn.Sequential(
                 TimeDistributed(mention_feedforward),
                 TimeDistributed(torch.nn.Linear(mention_feedforward.get_output_dim(), 1)))
-        self._mention_pruner = SpanPruner(feedforward_scorer)
+        self._mention_pruner = Pruner(feedforward_scorer)
         self._antecedent_scorer = TimeDistributed(torch.nn.Linear(antecedent_feedforward.get_output_dim(), 1))
 
         self._endpoint_span_extractor = EndpointSpanExtractor(context_layer.get_output_dim(),
@@ -277,7 +277,7 @@ class CoreferenceResolver(Model):
             # probability assigned to all valid antecedents. This is a valid objective for
             # clustering as we don't mind which antecedent is predicted, so long as they are in
             #  the same coreference cluster.
-            coreference_log_probs = util.last_dim_log_softmax(coreference_scores, top_span_mask)
+            coreference_log_probs = util.masked_log_softmax(coreference_scores, top_span_mask)
             correct_antecedent_log_probs = coreference_log_probs + gold_antecedent_labels.log()
             negative_marginal_log_likelihood = -util.logsumexp(correct_antecedent_log_probs).sum()
 

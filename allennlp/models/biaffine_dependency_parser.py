@@ -16,8 +16,8 @@ from allennlp.modules import FeedForward
 from allennlp.models.model import Model
 from allennlp.nn import InitializerApplicator, RegularizerApplicator, Activation
 from allennlp.nn.util import get_text_field_mask, get_range_vector
-from allennlp.nn.util import get_device_of, last_dim_log_softmax, get_lengths_from_binary_sequence_mask
-from allennlp.nn.decoding.chu_liu_edmonds import decode_mst
+from allennlp.nn.util import get_device_of, masked_log_softmax, get_lengths_from_binary_sequence_mask
+from allennlp.nn.chu_liu_edmonds import decode_mst
 from allennlp.training.metrics import AttachmentScores
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -35,7 +35,7 @@ class BiaffineDependencyParser(Model):
     followed by separate biaffine classifiers for pairs of words,
     predicting whether a directed arc exists between the two words
     and the dependency label the arc should have. Decoding can either
-    be done greedily, or the optimial Minimum Spanning Tree can be
+    be done greedily, or the optimal Minimum Spanning Tree can be
     decoded using Edmond's algorithm by viewing the dependency tree as
     a MST on a fully connected graph, where nodes are words and edges
     are scored dependency arcs.
@@ -138,7 +138,7 @@ class BiaffineDependencyParser(Model):
         tags = self.vocab.get_token_to_index_vocabulary("pos")
         punctuation_tag_indices = {tag: index for tag, index in tags.items() if tag in POS_TO_IGNORE}
         self._pos_to_ignore = set(punctuation_tag_indices.values())
-        logger.info(f"Found POS tags correspoding to the following punctuation : {punctuation_tag_indices}. "
+        logger.info(f"Found POS tags corresponding to the following punctuation : {punctuation_tag_indices}. "
                     "Ignoring words with these POS tags for evaluation.")
 
         self._attachment_scores = AttachmentScores()
@@ -328,7 +328,7 @@ class BiaffineDependencyParser(Model):
             for the given arcs.
         attended_arcs : ``torch.Tensor``, required.
             A tensor of shape (batch_size, sequence_length, sequence_length) used to generate
-            a distribution over attachements of a given word to all other words.
+            a distribution over attachments of a given word to all other words.
         head_indices : ``torch.Tensor``, required.
             A tensor of shape (batch_size, sequence_length).
             The indices of the heads for every word.
@@ -351,13 +351,13 @@ class BiaffineDependencyParser(Model):
         # shape (batch_size, 1)
         range_vector = get_range_vector(batch_size, get_device_of(attended_arcs)).unsqueeze(1)
         # shape (batch_size, sequence_length, sequence_length)
-        normalised_arc_logits = last_dim_log_softmax(attended_arcs,
-                                                     mask) * float_mask.unsqueeze(2) * float_mask.unsqueeze(1)
+        normalised_arc_logits = masked_log_softmax(attended_arcs,
+                                                   mask) * float_mask.unsqueeze(2) * float_mask.unsqueeze(1)
 
         # shape (batch_size, sequence_length, num_head_tags)
         head_tag_logits = self._get_head_tags(head_tag_representation, child_tag_representation, head_indices)
-        normalised_head_tag_logits = last_dim_log_softmax(head_tag_logits,
-                                                          mask.unsqueeze(-1)) * float_mask.unsqueeze(-1)
+        normalised_head_tag_logits = masked_log_softmax(head_tag_logits,
+                                                        mask.unsqueeze(-1)) * float_mask.unsqueeze(-1)
         # index matrix with shape (batch, sequence_length)
         timestep_index = get_range_vector(sequence_length, get_device_of(attended_arcs))
         child_index = timestep_index.view(1, sequence_length).expand(batch_size, sequence_length).long()
@@ -385,7 +385,7 @@ class BiaffineDependencyParser(Model):
         """
         Decodes the head and head tag predictions by decoding the unlabeled arcs
         independently for each word and then again, predicting the head tags of
-        these greedily chosen arcs indpendently. Note that this method of decoding
+        these greedily chosen arcs independently. Note that this method of decoding
         is not guaranteed to produce trees (i.e. there maybe be multiple roots,
         or cycles when children are attached to their parents).
 
@@ -401,7 +401,7 @@ class BiaffineDependencyParser(Model):
             for the given arcs.
         attended_arcs : ``torch.Tensor``, required.
             A tensor of shape (batch_size, sequence_length, sequence_length) used to generate
-            a distribution over attachements of a given word to all other words.
+            a distribution over attachments of a given word to all other words.
 
         Returns
         -------
@@ -456,7 +456,7 @@ class BiaffineDependencyParser(Model):
             for the given arcs.
         attended_arcs : ``torch.Tensor``, required.
             A tensor of shape (batch_size, sequence_length, sequence_length) used to generate
-            a distribution over attachements of a given word to all other words.
+            a distribution over attachments of a given word to all other words.
 
         Returns
         -------

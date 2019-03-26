@@ -42,12 +42,22 @@ def main(checks):
             run("./scripts/check_links.py", shell=True, check=True)
             print("check links passed")
 
+        if "check-requirements" in checks:
+            print("Checking requirements.txt against setup.py", flush=True)
+            run("./scripts/check_requirements_and_setup.py", shell=True, check=True)
+            print("check requirements passed")
+
+        if "check-large-files" in checks:
+            print("Checking all added files have size <= 2MB", flush=True)
+            run("./scripts/check_large_files.sh 2", shell=True, check=True)
+            print("check large files passed")
+
     except CalledProcessError:
         # squelch the exception stacktrace
         sys.exit(1)
 
 if __name__ == "__main__":
-    checks = ['pytest', 'pylint', 'mypy', 'build-docs', 'check-docs', 'check-links']
+    checks = ['pytest', 'pylint', 'mypy', 'build-docs', 'check-docs', 'check-links', 'check-requirements', 'check-large-files']
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--checks', type=str, required=False, nargs='+', choices=checks)

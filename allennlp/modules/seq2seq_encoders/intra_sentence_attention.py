@@ -43,7 +43,7 @@ class IntraSentenceAttentionEncoder(Seq2SeqEncoder):
         :func:`~allennlp.nn.util.combine_tensors`; see that function for more detail on exactly how
         this works, but some simple examples are ``"1,2"`` for concatenation (the default),
         ``"1+2"`` for adding the two, or ``"2"`` for only keeping the attention representation.
-    output_dim : ``bool``, optional (default = None)
+    output_dim : ``int``, optional (default = None)
         The dimension of an optional output projection.
     """
     def __init__(self,
@@ -107,7 +107,7 @@ class IntraSentenceAttentionEncoder(Seq2SeqEncoder):
             similarity_matrix = similarity_matrix.permute(0, 1, 3, 2)
 
         # Shape: (batch_size, sequence_length, [num_heads,] sequence_length)
-        intra_sentence_attention = util.last_dim_softmax(similarity_matrix.contiguous(), mask)
+        intra_sentence_attention = util.masked_softmax(similarity_matrix.contiguous(), mask)
 
         # Shape: (batch_size, sequence_length, projection_dim)
         output_token_representation = self._projection(tokens)

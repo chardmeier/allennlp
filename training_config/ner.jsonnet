@@ -1,3 +1,5 @@
+// Configuration for a named entity recognization model based on:
+//   Peters, Matthew E. et al. “Deep contextualized word representations.” NAACL-HLT (2018).
 {
   "dataset_reader": {
     "type": "conll2003",
@@ -9,20 +11,19 @@
         "lowercase_tokens": true
       },
       "token_characters": {
-        "type": "characters"
-      },
-      "elmo": {
-        "type": "elmo_characters"
-     }
+        "type": "characters",
+        "min_padding_length": 3
+      }
     }
   },
   "train_data_path": std.extVar("NER_TRAIN_DATA_PATH"),
   "validation_data_path": std.extVar("NER_TEST_A_PATH"),
   "test_data_path": std.extVar("NER_TEST_B_PATH"),
-  "evaluate_on_test": true,
   "model": {
     "type": "crf_tagger",
-    "constraint_type": "BIOUL",
+    "label_encoding": "BIOUL",
+    "constrain_crf_decoding": true,
+    "calculate_span_f1": true,
     "dropout": 0.5,
     "include_start_end_transitions": false,
     "text_field_embedder": {
@@ -33,45 +34,29 @@
             "pretrained_file": "https://s3-us-west-2.amazonaws.com/allennlp/datasets/glove/glove.6B.50d.txt.gz",
             "trainable": true
         },
-        "elmo":{
-            "type": "elmo_token_embedder",
-        "options_file": "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json",
-        "weight_file": "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5",
-            "do_layer_norm": false,
-            "dropout": 0.0
-        },
         "token_characters": {
             "type": "character_encoding",
             "embedding": {
-            "embedding_dim": 16
+                "embedding_dim": 16
             },
             "encoder": {
-            "type": "cnn",
-            "embedding_dim": 16,
-            "num_filters": 128,
-            "ngram_filter_sizes": [3],
-            "conv_layer_activation": "relu"
+                "type": "cnn",
+                "embedding_dim": 16,
+                "num_filters": 128,
+                "ngram_filter_sizes": [3],
+                "conv_layer_activation": "relu"
             }
-        }
-      }
+          }
+       },
     },
     "encoder": {
-      "type": "lstm",
-      "input_size": 1202,
-      "hidden_size": 200,
-      "num_layers": 2,
-      "dropout": 0.5,
-      "bidirectional": true
+        "type": "lstm",
+        "input_size": 50 + 128,
+        "hidden_size": 200,
+        "num_layers": 2,
+        "dropout": 0.5,
+        "bidirectional": true
     },
-    "regularizer": [
-      [
-        "scalar_parameters",
-        {
-          "type": "l2",
-          "alpha": 0.1
-        }
-      ]
-    ]
   },
   "iterator": {
     "type": "basic",
